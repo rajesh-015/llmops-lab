@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+spec:
+  ports:
+  - port: 80
+    targetPort: 8000
+  selector:
+    app: rag-api
+  type: LoadBalancer # Exposes an external IP (or NodePort for Minikube)
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+spec:
+  replicas: 2 # Stateless, so we can scale this easily!
+  selector:
+    matchLabels:
+      app: rag-api
+  template:
+    metadata:
+      labels:
+        app: rag-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+      - name: rag-api
+        image: ghcr.io/YOUR_USERNAME/llmops-lab:latest 
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: OLLAMA_URL
+          value: "http://ollama:11434"
+        - name: QDRANT_URL
+          value: "http://qdrant:6333"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
