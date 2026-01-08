@@ -1,0 +1,81 @@
+name: LLMOps Production Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  # Using GitHub Container Registry (Free & Private)
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # JOB 1: Code Quality (The "Gatekeeper")
+  quality-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip' # <--- AUTOMATIC PIP CACHING
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install httpx pytest pylint
+
+      - name: Linting (Static Analysis)
+        # Fail if code is rated < 8.0/10 (Enforcing quality)
+        run: |
+          pylint $(git ls-files 'app/*.py') --fail-under=8
+
+      - name: Run Unit Tests
+        # We mock external services so we don't need Ollama running for CI
+        run: |
+          pytest app/test_main.py
+
+  # JOB 2: Build & Push Docker Image
+  build-and-push:
+    needs: quality-check # Only run if tests pass
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Metadata (Tags, Labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long # e.g., image:sha-8f7d6a2
+            type=raw,value=latest
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # DevOps Pro Tip: Cache layers to speed up builds significantly
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
